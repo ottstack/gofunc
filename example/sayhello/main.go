@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ottstask/gofunc"
-	"github.com/ottstask/gofunc/pkg/middleware"
-	"github.com/ottstask/gofunc/pkg/websocket"
+	"github.com/ottstack/gofunc"
+	"github.com/ottstack/gofunc/pkg/middleware"
+	"github.com/ottstack/gofunc/pkg/websocket"
 )
 
 type GetRequest struct {

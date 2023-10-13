@@ -1,4 +1,4 @@
-module github.com/ottstask/gofunc
+module github.com/ottstack/gofunc
 
 go 1.20
 

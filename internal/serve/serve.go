@@ -11,8 +11,8 @@ import (
 	"github.com/fasthttp/websocket"
 	"github.com/iancoleman/strcase"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/ottstask/gofunc/pkg/ecode"
-	"github.com/ottstask/gofunc/pkg/middleware"
+	"github.com/ottstack/gofunc/pkg/ecode"
+	"github.com/ottstack/gofunc/pkg/middleware"
 	"github.com/valyala/fasthttp"
 	"go.uber.org/automaxprocs/maxprocs"
 )

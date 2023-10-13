@@ -3,7 +3,7 @@ package middleware
 import (
 	"context"
 
-	"github.com/ottstask/gofunc/pkg/ecode"
+	"github.com/ottstack/gofunc/pkg/ecode"
 	validate "github.com/go-playground/validator/v10"
 	"github.com/valyala/fasthttp"
 )

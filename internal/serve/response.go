@@ -3,7 +3,7 @@ package serve
 import (
 	"net/url"
 
-	"github.com/ottstask/gofunc/pkg/ecode"
+	"github.com/ottstack/gofunc/pkg/ecode"
 	json "github.com/goccy/go-json"
 	"github.com/gorilla/schema"
 	"github.com/valyala/fasthttp"

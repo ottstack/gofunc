@@ -3,8 +3,8 @@ package gofunc
 import (
 	"log"
 
-	"github.com/ottstask/gofunc/internal/serve"
-	"github.com/ottstask/gofunc/pkg/middleware"
+	"github.com/ottstack/gofunc/internal/serve"
+	"github.com/ottstack/gofunc/pkg/middleware"
 )
 
 var globalServer = serve.NewServer()
