@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/ottstack/gofunc"
-	"github.com/ottstack/gofunc/pkg/middleware"
 	"github.com/ottstack/gofunc/pkg/websocket"
 )
 
@@ -25,25 +24,17 @@ type StreamRequest struct {
 	Name string `validate:"required"`
 }
 
-type helloHandler struct {
-}
-
-func (h *helloHandler) Get(ctx context.Context, req *GetRequest, rsp *Response) error {
+func Get(ctx context.Context, req *GetRequest, rsp *Response) error {
 	rsp.Reply = "Get by " + req.Name
 	return nil
 }
 
-func (h *helloHandler) GetMore(ctx context.Context, req *GetRequest, rsp *Response) error {
-	rsp.Reply = "Get More by " + req.Name
-	return nil
-}
-
-func (h *helloHandler) Post(ctx context.Context, req *PostRequest, rsp *Response) error {
+func Post(ctx context.Context, req *PostRequest, rsp *Response) error {
 	rsp.Reply = "Post by " + req.Name
 	return nil
 }
 
-func (s *helloHandler) Stream(ctx context.Context, req websocket.RecvStream, rsp websocket.SendStream) error {
+func Stream(ctx context.Context, req websocket.RecvStream, rsp websocket.SendStream) error {
 	ct := 0
 	for {
 		msg, err := req.Recv()
@@ -62,12 +53,25 @@ func (s *helloHandler) Stream(ctx context.Context, req websocket.RecvStream, rsp
 	}
 }
 
+// val := reflect.ValueOf(abcGet)
+
+// ctx := context.Background()
+// req := &GetRequest{Name: "abc"}
+// rsp := &Response{}
+// args := []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req), reflect.ValueOf(rsp)}
+// fmt.Println(val.Call(args))
+// fmt.Println("rsp", rsp.Reply)
+// return
+
 func main() {
+
 	// GET /api/hello?name=bob
-	// GET /api/hello/more?name=bob
 	// POST /api/hello -d '{"name":"bob"}'
 	// GET /api/hello-ws?name=bob (websocket)
-	gofunc.Handle(&helloHandler{})
-	gofunc.Use(middleware.Recover).Use(middleware.Validator)
+	gofunc.Get("/api/hello", Get)
+	// gofunc.Post("/api/hello", Post)
+	// gofunc.Stream("/api/hello", Stream)
+
+	// gofunc.Use(middleware.Recover).Use(middleware.Validator)
 	gofunc.Serve()
 }

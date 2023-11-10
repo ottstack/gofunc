@@ -43,7 +43,7 @@ func newOpenapi(path string) *openapi {
 }
 
 func (o *openapi) addMethod(info *methodInfo) {
-	methodName := info.handlerName + info.method.Name
+	methodName := "info.handlerName + info.method.Name"
 	rspContent := openapi3.Content{"application/json": {
 		Schema: &openapi3.SchemaRef{
 			Ref: schemaPrefix + methodName + "Response",
@@ -53,7 +53,7 @@ func (o *openapi) addMethod(info *methodInfo) {
 
 	oper := &openapi3.Operation{
 		OperationID: methodName,
-		Tags:        []string{info.handlerName},
+		Tags:        []string{"default"},
 		Summary:     "",
 		Responses: openapi3.Responses{
 			"200": &openapi3.ResponseRef{

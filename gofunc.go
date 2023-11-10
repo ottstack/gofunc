@@ -9,12 +9,8 @@ import (
 
 var globalServer = serve.NewServer()
 
-// Handle ...
-func Handle(handlers ...interface{}) {
-	err := globalServer.Handle(handlers...)
-	if err != nil {
-		log.Fatal(err)
-	}
+func Get(path string, function interface{}) {
+	handle("GET", path, function)
 }
 
 func Use(m middleware.Middleware) *serve.Server {
@@ -24,6 +20,13 @@ func Use(m middleware.Middleware) *serve.Server {
 // Serve ...
 func Serve() {
 	if err := globalServer.Serve(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func handle(method, path string, function interface{}) {
+	err := globalServer.Handle(method, path, function)
+	if err != nil {
 		log.Fatal(err)
 	}
 }

@@ -41,9 +41,7 @@ type serveConfig struct {
 
 type methodFactory func() (middleware.MethodFunc, interface{}, interface{})
 type methodInfo struct {
-	handlerName string
-	handlerVal  reflect.Value
-	method      reflect.Method
+	method interface{}
 
 	httpMethod  string
 	factory     methodFactory
@@ -78,41 +76,27 @@ func NewServer() *Server {
 	return sv
 }
 
-func (s *Server) Handle(handlers ...interface{}) error {
-	for _, srv := range handlers {
-		srvType := reflect.TypeOf(srv)
-		srvValue := reflect.ValueOf(srv)
-
-		if srvType.Kind() != reflect.Ptr || srvValue.Elem().Kind() != reflect.Struct {
-			return fmt.Errorf("handler should be pointer of struct")
-		}
-
-		srvName := srvType.Elem().Name()
-		if !strings.HasSuffix(srvName, "Handler") {
-			return fmt.Errorf("struct name '%s' should have suffix 'Handler'", srvName)
-		}
-		for i := 0; i < srvType.NumMethod(); i++ {
-			info := &methodInfo{
-				handlerName: srvName,
-				handlerVal:  srvValue,
-				method:      srvType.Method(i),
-			}
-			if err := parseMethods(info); err != nil {
-				return err
-			}
-			if _, ok := s.methods[info.httpMethod]; !ok {
-				s.methods[info.httpMethod] = make(map[string]methodFactory)
-			}
-			path := formatPath(s.pathPrefix, srvName, info.method.Name)
-			s.methods[info.httpMethod][path] = info.factory
-			if info.isWebsocket {
-				s.streamMethods[path] = true
-			}
-
-			info.path = path
-			s.api.addMethod(info)
-		}
+func (s *Server) Handle(method, path string, function interface{}) error {
+	info := &methodInfo{
+		httpMethod: method,
+		path:       path,
+		method:     function,
 	}
+	if err := parseMethods(info); err != nil {
+		return err
+	}
+	if _, ok := s.methods[info.httpMethod]; !ok {
+		s.methods[info.httpMethod] = make(map[string]methodFactory)
+	}
+
+	if info.httpMethod == "STREAM" {
+		info.httpMethod = "GET"
+		s.streamMethods[path] = true
+	}
+
+	s.methods[info.httpMethod][path] = info.factory
+
+	s.api.addMethod(info)
 	return nil
 }
 
@@ -253,55 +237,49 @@ func (s *Server) PathMapping(m map[string]string) *Server {
 }
 
 func parseMethods(m *methodInfo) error {
-	handlerName := m.handlerName
-	method := m.method
-	if method.Type.NumIn() != 4 {
-		return fmt.Errorf("the number of argment in %s.%s should be 3", handlerName, method.Name)
+	method := reflect.TypeOf(m.method)
+	if method.NumIn() != 3 {
+		return fmt.Errorf("the number of argment in %s should be 3", m.path)
 	}
-	if method.Type.NumOut() != 1 {
-		return fmt.Errorf("the number of return value in %s.%s should be 1", handlerName, method.Name)
+	if method.NumOut() != 1 {
+		return fmt.Errorf("the number of return value in %s should be 1", m.path)
 	}
 
-	ctx := method.Type.In(1)
-	req := method.Type.In(2)
-	rsp := method.Type.In(3)
+	ctx := method.In(0)
+	req := method.In(1)
+	rsp := method.In(2)
 
 	if ctx.PkgPath() != "context" || ctx.Name() != "Context" {
-		return fmt.Errorf("first argment in %s.%s should be context.Context", handlerName, method.Name)
+		return fmt.Errorf("first argment in %s should be context.Context", m.path)
 	}
 
-	if strings.HasPrefix(method.Name, "Stream") {
+	if m.httpMethod == "STREAM" {
 		if req.Kind() != reflect.Interface || req.Name() != "RecvStream" {
-			return fmt.Errorf("the type of third argment in %s/%s should be websocket.RecvStream", handlerName, method.Name)
+			return fmt.Errorf("the type of third argment in %s should be websocket.RecvStream", m.path)
 		}
 		if rsp.Kind() != reflect.Interface || rsp.Name() != "SendStream" {
-			return fmt.Errorf("the type of third argment in %s/%s should be websocket.SendStream", handlerName, method.Name)
+			return fmt.Errorf("the type of third argment in %s should be websocket.SendStream", m.path)
 		}
 		m.isWebsocket = true
 	} else {
 		if req.Kind() != reflect.Ptr || req.Elem().Kind() != reflect.Struct {
-			return fmt.Errorf("the type of second argment in %s/%s should be pointer to struct", handlerName, method.Name)
+			return fmt.Errorf("the type of second argment in %s should be pointer to struct", m.path)
 		}
 		if rsp.Kind() != reflect.Ptr || rsp.Elem().Kind() != reflect.Struct {
-			return fmt.Errorf("the type of third argment in %s/%s should be pointer to struct", handlerName, method.Name)
+			return fmt.Errorf("the type of third argment in %s should be pointer to struct", m.path)
 		}
 	}
 
-	ret := method.Type.Out(0)
+	ret := method.Out(0)
 	if ret.PkgPath() != "" || ret.Name() != "error" {
-		return fmt.Errorf("return type in %s.%s should be error", handlerName, method.Name)
+		return fmt.Errorf("return type in %s should be error", m.path)
 	}
 
-	httpMethod := getHttpMethod(method.Name)
-	if httpMethod == "" {
-		return fmt.Errorf("%s.%s function name prefix must be one of Get,Post,Put,Delete", handlerName, method.Name)
-	}
-	m.httpMethod = strings.ToUpper(httpMethod)
-
+	methodValue := reflect.ValueOf(m.method)
 	callFunc := func(ctx context.Context, req, rsp interface{}) error {
 		// args := []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req), reflect.ValueOf(rsp)}
-		args := []reflect.Value{m.handlerVal, reflect.ValueOf(ctx), reflect.ValueOf(req), reflect.ValueOf(rsp)}
-		retValues := method.Func.Call(args)
+		args := []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req), reflect.ValueOf(rsp)}
+		retValues := methodValue.Call(args)
 		ret := retValues[0].Interface()
 		if ret != nil {
 			// ingore close error message
