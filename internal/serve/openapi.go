@@ -43,16 +43,15 @@ func newOpenapi(path string) *openapi {
 }
 
 func (o *openapi) addMethod(info *methodInfo) {
-	methodName := "info.handlerName + info.method.Name"
 	rspContent := openapi3.Content{"application/json": {
 		Schema: &openapi3.SchemaRef{
-			Ref: schemaPrefix + methodName + "Response",
+			Ref: schemaPrefix + info.operationId + info.rspType.Name(),
 		},
 	},
 	}
 
 	oper := &openapi3.Operation{
-		OperationID: methodName,
+		OperationID: info.operationId,
 		Tags:        []string{"default"},
 		Summary:     "",
 		Responses: openapi3.Responses{
@@ -90,14 +89,14 @@ func (o *openapi) addMethod(info *methodInfo) {
 				Required: true,
 				Content: openapi3.Content{"application/json": {
 					Schema: &openapi3.SchemaRef{
-						Ref: schemaPrefix + methodName + "Request",
+						Ref: schemaPrefix + info.operationId + info.reqType.Name(),
 					},
 				},
 				}},
 		}
-		o.parseType(methodName+"Request", reqFieldTag, info.reqType)
+		o.parseType(info.operationId, reqFieldTag, info.reqType)
 	} else {
-		oper.Parameters = o.buildParameter(methodName+"Request", info.reqType)
+		oper.Parameters = o.buildParameter(info.operationId, info.reqType)
 	}
 
 	if _, ok := o.model.Paths[info.path]; !ok {
@@ -114,22 +113,22 @@ func (o *openapi) addMethod(info *methodInfo) {
 		o.model.Paths[info.path].Post = oper
 	}
 
-	o.parseType(methodName+"Response", rspFieldTag, info.rspType)
+	o.parseType(info.operationId, rspFieldTag, info.rspType)
 }
 
-func (o *openapi) buildParameter(typeName string, reqType reflect.Type) openapi3.Parameters {
+func (o *openapi) buildParameter(namespace string, reqType reflect.Type) openapi3.Parameters {
 	elemType := reqType
 	if elemType.Kind() == reflect.Ptr { // pointer to struct
 		elemType = reqType.Elem()
 	}
-	if elemType.Kind() != reflect.Struct {
-		// not struct
-		return nil
-	}
-	o.parseType(typeName, reqFieldTag, reqType)
+	o.parseType(namespace, reqFieldTag, reqType)
+	typeName := namespace + elemType.Name()
 	ref := o.model.Components.Schemas[typeName]
 
 	ret := openapi3.Parameters{}
+	if ref == nil {
+		return ret
+	}
 	for key, v := range ref.Value.Properties {
 		required := inArray(v.Value.Required, key)
 		p := &openapi3.Parameter{In: "query", Name: key, Required: required}
@@ -147,8 +146,8 @@ func inArray(arr []string, t string) bool {
 	return false
 }
 
-func (o *openapi) checkSchemaExists(parentType string, st reflect.Type) bool {
-	name := parentType + st.Name()
+func (o *openapi) checkSchemaExists(namespace string, st reflect.Type) bool {
+	name := namespace + st.Name()
 	pkg := st.PkgPath()
 	if vv, ok := o.namePkg[name]; ok {
 		if vv != pkg {
@@ -176,11 +175,12 @@ func (o *openapi) getOpenAPIV3() []byte {
 	return prettyJSON.Bytes()
 }
 
-func (o *openapi) parseType(typeName, tag string, rType reflect.Type) *openapi3.SchemaRef {
+func (o *openapi) parseType(namespace, tag string, rType reflect.Type) *openapi3.SchemaRef {
 	elemType := rType
 	if elemType.Kind() == reflect.Ptr { // pointer to struct
 		elemType = rType.Elem()
 	}
+
 	var apiType string
 	var subType *openapi3.SchemaRef
 	var properties openapi3.Schemas
@@ -199,49 +199,45 @@ func (o *openapi) parseType(typeName, tag string, rType reflect.Type) *openapi3.
 		if keyType == nil || keyType.Kind() != reflect.String {
 			panic(fmt.Sprintf("map key type for %s should be string instand of %v", elemType.Name(), elemType.Kind()))
 		}
-		subType = o.parseType(typeName, tag, elemType.Elem())
+		subType = o.parseType(namespace, tag, elemType.Elem())
 	case reflect.Array, reflect.Slice:
 		apiType = "array"
-		subType = o.parseType(typeName, tag, elemType.Elem())
-	case reflect.Interface:
-		apiType = "string"
-	case reflect.Struct:
+		subType = o.parseType(namespace, tag, elemType.Elem())
+	case reflect.Interface, reflect.Struct:
 		apiType = "object"
-		if !o.checkSchemaExists(typeName, elemType) {
-			stName := elemType.Name()
-			if !unicode.IsUpper(rune(stName[0])) {
-				panic(fmt.Sprintf("%s must be exportable", stName))
-			}
+		if !o.checkSchemaExists(namespace, elemType) {
 			properties = openapi3.Schemas{}
 			var requiredFields []string
-			for i := 0; i < elemType.NumField(); i++ {
-				field := elemType.Field(i)
-				fieldType := field.Type
-				if fieldType.Kind() == reflect.Ptr {
-					fieldType = field.Type.Elem()
-				}
-				if !unicode.IsUpper(rune(field.Name[0])) {
-					continue
-				}
-				fieldTag := field.Tag.Get(tag)
-				if fieldTag == "-" {
-					continue
-				}
-				if fieldTag == "" {
-					fieldTag = field.Name
-				}
-				fieldSchema := o.parseType(typeName+fieldType.Name(), tag, fieldType)
+			if elemType.Kind() == reflect.Struct {
+				for i := 0; i < elemType.NumField(); i++ {
+					field := elemType.Field(i)
+					fieldType := field.Type
+					if fieldType.Kind() == reflect.Ptr {
+						fieldType = field.Type.Elem()
+					}
+					if !unicode.IsUpper(rune(field.Name[0])) {
+						continue
+					}
+					fieldTag := field.Tag.Get(tag)
+					if fieldTag == "-" {
+						continue
+					}
+					if fieldTag == "" {
+						fieldTag = field.Name
+					}
+					fieldSchema := o.parseType(namespace, tag, fieldType)
 
-				validateTag := field.Tag.Get("validate")
-				if strings.HasSuffix(validateTag, "required") || strings.Contains(validateTag, "required,") {
-					requiredFields = append(requiredFields, fieldTag)
-				}
+					validateTag := field.Tag.Get("validate")
+					if strings.HasSuffix(validateTag, "required") || strings.Contains(validateTag, "required,") {
+						requiredFields = append(requiredFields, fieldTag)
+					}
 
-				if fieldSchema.Value != nil {
-					fieldSchema.Value.Title = field.Name
-				}
+					if fieldSchema.Value != nil {
+						fieldSchema.Value.Title = field.Name
+					}
 
-				properties[fieldTag] = fieldSchema
+					properties[fieldTag] = fieldSchema
+				}
 			}
 			title := elemType.Name()
 			schemaRef := &openapi3.SchemaRef{Value: &openapi3.Schema{
@@ -250,6 +246,7 @@ func (o *openapi) parseType(typeName, tag string, rType reflect.Type) *openapi3.
 				Description: title,
 				Required:    requiredFields,
 			}}
+			typeName := namespace + elemType.Name()
 			o.model.Components.Schemas[typeName] = schemaRef
 		}
 	default:

@@ -5,32 +5,20 @@ import (
 	"fmt"
 
 	"github.com/ottstack/gofunc"
+	"github.com/ottstack/gofunc/pkg/middleware"
 	"github.com/ottstack/gofunc/pkg/websocket"
 )
 
-type GetRequest struct {
+type Request struct {
 	Name string `schema:"name" validate:"required"` // decode from query by github.com/gorilla/schema
-}
-
-type PostRequest struct {
-	Name string `json:"name" validate:"required"` // decode from json body by github.com/goccy/go-json
 }
 
 type Response struct {
 	Reply string `json:"reply"`
 }
 
-type StreamRequest struct {
-	Name string `validate:"required"`
-}
-
-func Get(ctx context.Context, req *GetRequest, rsp *Response) error {
-	rsp.Reply = "Get by " + req.Name
-	return nil
-}
-
-func Post(ctx context.Context, req *PostRequest, rsp *Response) error {
-	rsp.Reply = "Post by " + req.Name
+func HelloFunc(ctx context.Context, req *Request, rsp *Response) error {
+	rsp.Reply = "Hello " + req.Name
 	return nil
 }
 
@@ -53,25 +41,15 @@ func Stream(ctx context.Context, req websocket.RecvStream, rsp websocket.SendStr
 	}
 }
 
-// val := reflect.ValueOf(abcGet)
-
-// ctx := context.Background()
-// req := &GetRequest{Name: "abc"}
-// rsp := &Response{}
-// args := []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req), reflect.ValueOf(rsp)}
-// fmt.Println(val.Call(args))
-// fmt.Println("rsp", rsp.Reply)
-// return
-
 func main() {
 
-	// GET /api/hello?name=bob
-	// POST /api/hello -d '{"name":"bob"}'
-	// GET /api/hello-ws?name=bob (websocket)
-	gofunc.Get("/api/hello", Get)
-	// gofunc.Post("/api/hello", Post)
-	// gofunc.Stream("/api/hello", Stream)
+	// curl '127.0.0.1:9001/api/hello?name=bob'
+	// curl '127.0.0.1:9001/api/hello' -d '{"name":"tom"}'
+	// websocket: 127.0.0.1:9001/api/hello-ws
+	gofunc.Get("/api/hello", HelloFunc)
+	gofunc.Post("/api/hello", HelloFunc)
+	gofunc.Stream("/api/hello-ws", Stream)
 
-	// gofunc.Use(middleware.Recover).Use(middleware.Validator)
+	gofunc.Use(middleware.Recover).Use(middleware.Validator)
 	gofunc.Serve()
 }
