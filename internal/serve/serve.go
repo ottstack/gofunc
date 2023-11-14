@@ -198,6 +198,7 @@ func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 		reqBody, err = encoder(rsp)
 		if err != nil {
 			writeErrResponse(fastReq, fmt.Errorf("marshal rsp error: %v", err))
+			return
 		}
 		fastReq.Write(reqBody)
 	}

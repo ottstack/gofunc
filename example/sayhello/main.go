@@ -10,7 +10,7 @@ import (
 )
 
 type Request struct {
-	Name string `schema:"name" validate:"required"` // decode from query by github.com/gorilla/schema
+	Name string `json:"name" schema:"name" validate:"required"`
 }
 
 type Response struct {
@@ -42,12 +42,13 @@ func Stream(ctx context.Context, req websocket.RecvStream, rsp websocket.SendStr
 }
 
 func main() {
-
 	// curl '127.0.0.1:9001/api/hello?name=bob'
-	// curl '127.0.0.1:9001/api/hello' -d '{"name":"tom"}'
-	// websocket: 127.0.0.1:9001/api/hello-ws
 	gofunc.Get("/api/hello", HelloFunc)
+
+	// curl '127.0.0.1:9001/api/hello' -d '{"name":"tom"}'
 	gofunc.Post("/api/hello", HelloFunc)
+
+	// websocket: 127.0.0.1:9001/api/hello-ws
 	gofunc.Stream("/api/hello-ws", Stream)
 
 	gofunc.Use(middleware.Recover).Use(middleware.Validator)
