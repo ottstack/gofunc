@@ -46,7 +46,7 @@ func main() {
 	// curl '127.0.0.1:9001/api/hello?name=bob'
 	gofunc.Get("/api/hello", HelloFunc)
 
-	// curl '127.0.0.1:9001/api/hello' -d '{"name":"tom"}'
+	// curl -X PUT '127.0.0.1:9001/api/hello' -d '{"name":"tom"}'
 	gofunc.Put("/api/hello", HelloFunc)
 
 	// websocket: 127.0.0.1:9001/api/hello-ws

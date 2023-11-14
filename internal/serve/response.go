@@ -17,7 +17,9 @@ var queryDecoder = func(queryStr []byte, v interface{}) error {
 	if err != nil {
 		return err
 	}
-	return schema.NewDecoder().Decode(v, u)
+	d := schema.NewDecoder()
+	d.IgnoreUnknownKeys(true)
+	return d.Decode(v, u)
 }
 
 func writeErrResponse(w *fasthttp.RequestCtx, err error) {
