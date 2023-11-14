@@ -1,10 +1,9 @@
 package gofunc
 
 import (
-	"log"
-
 	"github.com/ottstack/gofunc/internal/serve"
 	"github.com/ottstack/gofunc/pkg/middleware"
+	"github.com/valyala/fasthttp"
 )
 
 var globalServer = serve.NewServer()
@@ -29,16 +28,23 @@ func Use(m middleware.Middleware) *serve.Server {
 	return globalServer.Use(m)
 }
 
+func HandleHTTP(method, path string, f func(*fasthttp.RequestCtx)) {
+	err := globalServer.Handle(method, path, f)
+	if err != nil {
+		panic(err)
+	}
+}
+
 // Serve ...
 func Serve() {
 	if err := globalServer.Serve(); err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 }
 
 func handle(method, path string, function interface{}) {
 	err := globalServer.Handle(method, path, function)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 }

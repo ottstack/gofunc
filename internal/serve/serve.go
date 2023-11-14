@@ -16,8 +16,16 @@ import (
 	"go.uber.org/automaxprocs/maxprocs"
 )
 
+var allowMethod = map[string]bool{
+	"GET":    true,
+	"POST":   true,
+	"DELETE": true,
+	"PUT":    true,
+	"STREAM": true,
+}
+
 type Server struct {
-	methods       map[string]map[string]methodFactory
+	methods       map[string]methodFactory
 	streamMethods map[string]bool
 	api           *openapi
 	middlewares   []middleware.Middleware
@@ -27,6 +35,8 @@ type Server struct {
 	swaggerPath   string
 	pathMapping   map[string]string
 	apiContent    []byte
+
+	rawHandler map[string]func(*fasthttp.RequestCtx)
 
 	crossDomain bool
 }
@@ -65,9 +75,10 @@ func NewServer() *Server {
 		addr:          cfg.Addr,
 		ctx:           ctx,
 		cancelFunc:    cancelFunc,
-		methods:       make(map[string]map[string]methodFactory),
+		methods:       make(map[string]methodFactory),
 		streamMethods: make(map[string]bool),
 		crossDomain:   false,
+		rawHandler:    make(map[string]func(*fasthttp.RequestCtx)),
 	}
 	sv.api = newOpenapi(cfg.SwaggerPath)
 	sv.api.parseType("", rspFieldTag, reflect.TypeOf(&ecode.APIError{}))
@@ -75,6 +86,27 @@ func NewServer() *Server {
 }
 
 func (s *Server) Handle(method, path string, function interface{}) error {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	if !allowMethod[method] {
+		return fmt.Errorf("http method %s is unsupported", method)
+	}
+	checkMethod := method
+	if method == "STREAM" {
+		checkMethod = "GET"
+	}
+	methodPath := checkMethod + "_" + path
+	if _, ok := s.methods[methodPath]; ok {
+		return fmt.Errorf("%s %s already registered", method, path)
+	}
+	if _, ok := s.rawHandler[methodPath]; ok {
+		return fmt.Errorf("%s %s already registered for http handler", method, path)
+	}
+	if vv, ok := function.(func(*fasthttp.RequestCtx)); ok {
+		s.rawHandler[methodPath] = vv
+		return nil
+	}
 	info := &methodInfo{
 		httpMethod:  method,
 		path:        path,
@@ -90,11 +122,7 @@ func (s *Server) Handle(method, path string, function interface{}) error {
 		s.streamMethods[path] = true
 	}
 
-	if _, ok := s.methods[info.httpMethod]; !ok {
-		s.methods[info.httpMethod] = make(map[string]methodFactory)
-	}
-
-	s.methods[info.httpMethod][path] = info.factory
+	s.methods[methodPath] = info.factory
 
 	s.api.addMethod(info)
 	return nil
@@ -138,6 +166,13 @@ func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 		return
 	}
 
+	methodPath := method + "_" + path
+	hd, ok := s.rawHandler[methodPath]
+	if ok {
+		hd(fastReq)
+		return
+	}
+
 	if s.crossDomain {
 		referer := string(fastReq.Referer())
 		if u, _ := url.Parse(referer); u != nil {
@@ -154,8 +189,8 @@ func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 	}
 
 	// path to func
-	factory := s.getMethodFactory(method, path)
-	if factory == nil {
+	factory, ok := s.methods[methodPath]
+	if !ok {
 		writeErrResponse(fastReq, &ecode.APIError{Code: 404, Message: fmt.Sprintf("Request %s %s not found", method, path)})
 		return
 	}
@@ -221,15 +256,6 @@ func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 		decoder = queryDecoder
 	}
 	doCallFunc()
-}
-
-func (s *Server) getMethodFactory(method, path string) methodFactory {
-	if v, ok := s.methods[method]; ok {
-		if vv, ok := v[path]; ok {
-			return vv
-		}
-	}
-	return nil
 }
 
 func (s *Server) PathMapping(m map[string]string) *Server {

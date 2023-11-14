@@ -7,6 +7,7 @@ import (
 	"github.com/ottstack/gofunc"
 	"github.com/ottstack/gofunc/pkg/middleware"
 	"github.com/ottstack/gofunc/pkg/websocket"
+	"github.com/valyala/fasthttp"
 )
 
 type Request struct {
@@ -46,10 +47,15 @@ func main() {
 	gofunc.Get("/api/hello", HelloFunc)
 
 	// curl '127.0.0.1:9001/api/hello' -d '{"name":"tom"}'
-	gofunc.Post("/api/hello", HelloFunc)
+	gofunc.Put("/api/hello", HelloFunc)
 
 	// websocket: 127.0.0.1:9001/api/hello-ws
 	gofunc.Stream("/api/hello-ws", Stream)
+
+	// curl '127.0.0.1:9001/api/hello/2'
+	gofunc.HandleHTTP("GET", "/api/hello/2", func(rc *fasthttp.RequestCtx) {
+		rc.Response.BodyWriter().Write([]byte("HELLO FAST HTTP"))
+	})
 
 	gofunc.Use(middleware.Recover).Use(middleware.Validator)
 	gofunc.Serve()
