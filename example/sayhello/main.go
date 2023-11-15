@@ -11,7 +11,7 @@ import (
 )
 
 type Request struct {
-	Name string `json:"name" schema:"name" validate:"required"`
+	Name string `json:"name" schema:"name" validate:"required" comment:"Required Name"`
 }
 
 type Response struct {
@@ -44,13 +44,13 @@ func Stream(ctx context.Context, req websocket.RecvStream, rsp websocket.SendStr
 
 func main() {
 	// curl '127.0.0.1:9001/api/hello?name=bob'
-	gofunc.Get("/api/hello", HelloFunc)
+	gofunc.Get("/api/hello", HelloFunc, gofunc.WithSummary("Get Example"))
 
 	// curl -X PUT '127.0.0.1:9001/api/hello' -d '{"name":"tom"}'
-	gofunc.Put("/api/hello", HelloFunc)
+	gofunc.Put("/api/hello", HelloFunc, gofunc.WithSummary("Put Example"))
 
 	// websocket: 127.0.0.1:9001/api/hello-ws
-	gofunc.Stream("/api/hello-ws", Stream)
+	gofunc.Stream("/api/hello-ws", Stream, gofunc.WithSummary("Websocket Example"))
 
 	// curl '127.0.0.1:9001/api/hello/2'
 	gofunc.HandleHTTP("GET", "/api/hello/2", func(rc *fasthttp.RequestCtx) {

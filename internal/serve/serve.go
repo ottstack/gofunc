@@ -51,6 +51,9 @@ type methodInfo struct {
 	method      interface{}
 	operationId string
 
+	tags    []string
+	summary string
+
 	httpMethod  string
 	factory     methodFactory
 	reqType     reflect.Type
@@ -85,7 +88,7 @@ func NewServer() *Server {
 	return sv
 }
 
-func (s *Server) Handle(method, path string, function interface{}) error {
+func (s *Server) Handle(method, path string, function interface{}, summary string, tags []string) error {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
@@ -110,6 +113,8 @@ func (s *Server) Handle(method, path string, function interface{}) error {
 	info := &methodInfo{
 		httpMethod:  method,
 		path:        path,
+		summary:     summary,
+		tags:        tags,
 		method:      function,
 		operationId: method + strings.ReplaceAll(path, "/", "_"),
 	}
@@ -153,7 +158,6 @@ func (s *Server) Serve() error {
 // serve serve as http handler
 func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 	// serve openapi
-	fastReq.Request.URI().QueryString()
 	path := string(fastReq.Path())
 	method := strings.ToUpper(string(fastReq.Method()))
 	if path == s.swaggerPath+"api.json" {
@@ -163,6 +167,11 @@ func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 	if path == s.swaggerPath {
 		fastReq.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
 		fastReq.Write(s.api.getSwaggerHTML())
+		return
+	}
+	if path == s.swaggerPath+"doc" {
+		fastReq.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
+		fastReq.Write(s.api.getDocHTML())
 		return
 	}
 

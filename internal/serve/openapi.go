@@ -18,8 +18,9 @@ const rspFieldTag = "json"
 var API_JSON = ""
 
 type openapi struct {
-	model   *openapi3.T
-	swagger []byte
+	model       *openapi3.T
+	swaggerHTML []byte
+	docHTML     []byte
 
 	namePkg map[string]string
 }
@@ -37,7 +38,8 @@ func newOpenapi(path string) *openapi {
 			Schemas: openapi3.Schemas{},
 		},
 	}
-	o.swagger = []byte(fmt.Sprintf(swaggerHTML, path))
+	o.docHTML = []byte(fmt.Sprintf(docHTML, path))
+	o.swaggerHTML = []byte(fmt.Sprintf(swaggerHTML, path))
 	o.namePkg = map[string]string{}
 	return o
 }
@@ -52,8 +54,8 @@ func (o *openapi) addMethod(info *methodInfo) {
 
 	oper := &openapi3.Operation{
 		OperationID: info.operationId,
-		Tags:        []string{"default"},
-		Summary:     "",
+		Tags:        info.tags,
+		Summary:     info.summary,
 		Responses: openapi3.Responses{
 			"200": &openapi3.ResponseRef{
 				Value: &openapi3.Response{
@@ -131,7 +133,7 @@ func (o *openapi) buildParameter(namespace string, reqType reflect.Type) openapi
 	}
 	for key, v := range ref.Value.Properties {
 		required := inArray(v.Value.Required, key)
-		p := &openapi3.Parameter{In: "query", Name: key, Required: required}
+		p := &openapi3.Parameter{In: "query", Name: key, Required: required, Description: v.Value.Description}
 		ret = append(ret, &openapi3.ParameterRef{Value: p})
 	}
 	return ret
@@ -160,7 +162,11 @@ func (o *openapi) checkSchemaExists(namespace string, st reflect.Type) bool {
 }
 
 func (o *openapi) getSwaggerHTML() []byte {
-	return o.swagger
+	return o.swaggerHTML
+}
+
+func (o *openapi) getDocHTML() []byte {
+	return o.docHTML
 }
 
 func (o *openapi) getOpenAPIV3() []byte {
@@ -209,15 +215,35 @@ func (o *openapi) parseType(namespace, tag string, rType reflect.Type) *openapi3
 			properties = openapi3.Schemas{}
 			var requiredFields []string
 			if elemType.Kind() == reflect.Struct {
+				if elemType.Name() == "" {
+					panic(fmt.Sprintf("embed struct is unsupported in %s", namespace))
+				}
+				var fields []reflect.StructField
 				for i := 0; i < elemType.NumField(); i++ {
 					field := elemType.Field(i)
 					fieldType := field.Type
 					if fieldType.Kind() == reflect.Ptr {
 						fieldType = field.Type.Elem()
 					}
+					// inherited struct
+					if field.Anonymous && fieldType.Kind() == reflect.Struct {
+						for j := 0; j < field.Type.NumField(); j++ {
+							fields = append(fields, field.Type.Field(j))
+						}
+					} else {
+						fields = append(fields, field)
+					}
+				}
+				for _, field := range fields {
+					fieldType := field.Type
+					if fieldType.Kind() == reflect.Ptr {
+						fieldType = field.Type.Elem()
+					}
+
 					if !unicode.IsUpper(rune(field.Name[0])) {
 						continue
 					}
+
 					fieldTag := field.Tag.Get(tag)
 					if fieldTag == "-" {
 						continue
@@ -225,26 +251,27 @@ func (o *openapi) parseType(namespace, tag string, rType reflect.Type) *openapi3
 					if fieldTag == "" {
 						fieldTag = field.Name
 					}
-					fieldSchema := o.parseType(namespace, tag, fieldType)
+					if idx := strings.IndexRune(fieldTag, ','); idx >= 0 {
+						fieldTag = fieldTag[:idx]
+					}
 
+					fieldSchema := o.parseType(namespace, tag, fieldType)
 					validateTag := field.Tag.Get("validate")
 					if strings.HasSuffix(validateTag, "required") || strings.Contains(validateTag, "required,") {
 						requiredFields = append(requiredFields, fieldTag)
 					}
 
 					if fieldSchema.Value != nil {
-						fieldSchema.Value.Title = field.Name
+						fieldSchema.Value.Description = field.Tag.Get("comment")
 					}
 
 					properties[fieldTag] = fieldSchema
 				}
 			}
-			title := elemType.Name()
 			schemaRef := &openapi3.SchemaRef{Value: &openapi3.Schema{
-				Type:        "object",
-				Properties:  properties,
-				Description: title,
-				Required:    requiredFields,
+				Type:       "object",
+				Properties: properties,
+				Required:   requiredFields,
 			}}
 			typeName := namespace + elemType.Name()
 			o.model.Components.Schemas[typeName] = schemaRef
@@ -300,5 +327,31 @@ var swaggerHTML = `<!DOCTYPE html>
       });
     };
   </script>
+  </body>
+</html>`
+
+var docHTML = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>API Document</title>
+    <!-- needed for adaptive design -->
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
+
+    <!--
+    Redoc doesn't change outer page styles
+    -->
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <redoc spec-url='%sapi.json'></redoc>
+    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"> </script>
   </body>
 </html>`
