@@ -62,17 +62,7 @@ func (o *openapi) addMethod(info *methodInfo) {
 					Content: rspContent,
 				},
 			},
-			"400": &openapi3.ResponseRef{
-				Value: &openapi3.Response{
-					Content: openapi3.Content{"application/json": {
-						Schema: &openapi3.SchemaRef{
-							Ref: schemaPrefix + "APIError",
-						},
-					},
-					},
-				},
-			},
-			"500": &openapi3.ResponseRef{
+			"default": &openapi3.ResponseRef{
 				Value: &openapi3.Response{
 					Content: openapi3.Content{"application/json": {
 						Schema: &openapi3.SchemaRef{
