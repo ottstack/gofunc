@@ -18,7 +18,7 @@ type APIError struct {
 	// Error Message
 	Message string `json:"message"`
 	// Trace ID
-	TraceId string `json:"traceID"`
+	TraceId string `json:"traceID,omitempty"`
 }
 
 type arr2d [][]int

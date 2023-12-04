@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/fasthttp/websocket"
-	"github.com/iancoleman/strcase"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/ottstack/gofunc/pkg/ecode"
 	"github.com/ottstack/gofunc/pkg/middleware"
@@ -17,33 +16,43 @@ import (
 	"go.uber.org/automaxprocs/maxprocs"
 )
 
-var allowMethods = []string{"Get", "Post", "Delete", "Put", "Stream"}
+var allowMethod = map[string]bool{
+	"GET":    true,
+	"POST":   true,
+	"DELETE": true,
+	"PUT":    true,
+	"STREAM": true,
+}
 
 type Server struct {
-	methods       map[string]map[string]methodFactory
+	methods       map[string]methodFactory
 	streamMethods map[string]bool
 	api           *openapi
 	middlewares   []middleware.Middleware
 	ctx           context.Context
 	cancelFunc    context.CancelFunc
 	addr          string
-	pathPrefix    string
+	swaggerPath   string
 	pathMapping   map[string]string
 	apiContent    []byte
+
+	rawHandler map[string]func(*fasthttp.RequestCtx)
 
 	crossDomain bool
 }
 
 type serveConfig struct {
-	Addr    string
-	APIPath string
+	Addr        string
+	SwaggerPath string
 }
 
 type methodFactory func() (middleware.MethodFunc, interface{}, interface{})
 type methodInfo struct {
-	handlerName string
-	handlerVal  reflect.Value
-	method      reflect.Method
+	method      interface{}
+	operationId string
+
+	tags    []string
+	summary string
 
 	httpMethod  string
 	factory     methodFactory
@@ -55,8 +64,8 @@ type methodInfo struct {
 
 func NewServer() *Server {
 	cfg := &serveConfig{
-		Addr:    ":8080",
-		APIPath: "/api/",
+		Addr:        "127.0.0.1:9001",
+		SwaggerPath: "/",
 	}
 	err := envconfig.Process("serve", cfg)
 	if err != nil {
@@ -65,54 +74,62 @@ func NewServer() *Server {
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	sv := &Server{
-		pathPrefix:    cfg.APIPath,
+		swaggerPath:   cfg.SwaggerPath,
 		addr:          cfg.Addr,
 		ctx:           ctx,
 		cancelFunc:    cancelFunc,
-		methods:       make(map[string]map[string]methodFactory),
+		methods:       make(map[string]methodFactory),
 		streamMethods: make(map[string]bool),
 		crossDomain:   false,
+		rawHandler:    make(map[string]func(*fasthttp.RequestCtx)),
 	}
-	sv.api = newOpenapi(cfg.APIPath)
-	sv.api.parseType("APIError", rspFieldTag, reflect.TypeOf(&ecode.APIError{}))
+	sv.api = newOpenapi(cfg.SwaggerPath)
+	sv.api.parseType("", rspFieldTag, reflect.TypeOf(&ecode.APIError{}))
 	return sv
 }
 
-func (s *Server) Handle(handlers ...interface{}) error {
-	for _, srv := range handlers {
-		srvType := reflect.TypeOf(srv)
-		srvValue := reflect.ValueOf(srv)
-
-		if srvType.Kind() != reflect.Ptr || srvValue.Elem().Kind() != reflect.Struct {
-			return fmt.Errorf("handler should be pointer of struct")
-		}
-
-		srvName := srvType.Elem().Name()
-		if !strings.HasSuffix(srvName, "Handler") {
-			return fmt.Errorf("struct name '%s' should have suffix 'Handler'", srvName)
-		}
-		for i := 0; i < srvType.NumMethod(); i++ {
-			info := &methodInfo{
-				handlerName: srvName,
-				handlerVal:  srvValue,
-				method:      srvType.Method(i),
-			}
-			if err := parseMethods(info); err != nil {
-				return err
-			}
-			if _, ok := s.methods[info.httpMethod]; !ok {
-				s.methods[info.httpMethod] = make(map[string]methodFactory)
-			}
-			path := formatPath(s.pathPrefix, srvName, info.method.Name)
-			s.methods[info.httpMethod][path] = info.factory
-			if info.isWebsocket {
-				s.streamMethods[path] = true
-			}
-
-			info.path = path
-			s.api.addMethod(info)
-		}
+func (s *Server) Handle(method, path string, function interface{}, summary string, tag string) error {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
 	}
+	if !allowMethod[method] {
+		return fmt.Errorf("http method %s is unsupported", method)
+	}
+	checkMethod := method
+	if method == "STREAM" {
+		checkMethod = "GET"
+	}
+	methodPath := checkMethod + "_" + path
+	if _, ok := s.methods[methodPath]; ok {
+		return fmt.Errorf("%s %s already registered", method, path)
+	}
+	if _, ok := s.rawHandler[methodPath]; ok {
+		return fmt.Errorf("%s %s already registered for http handler", method, path)
+	}
+	if vv, ok := function.(func(*fasthttp.RequestCtx)); ok {
+		s.rawHandler[methodPath] = vv
+		return nil
+	}
+	info := &methodInfo{
+		httpMethod:  method,
+		path:        path,
+		summary:     summary,
+		tags:        []string{tag},
+		method:      function,
+		operationId: method + strings.ReplaceAll(path, "/", "_"),
+	}
+	if err := parseMethods(info); err != nil {
+		return err
+	}
+
+	if info.httpMethod == "STREAM" {
+		info.httpMethod = "GET"
+		s.streamMethods[path] = true
+	}
+
+	s.methods[methodPath] = info.factory
+
+	s.api.addMethod(info)
 	return nil
 }
 
@@ -133,7 +150,7 @@ func (s *Server) Serve() error {
 	if addrInfo[0] == "" || addrInfo[0] == "0" || addrInfo[0] == "0.0.0.0" {
 		showAddr = "localhost:" + addrInfo[1]
 	}
-	log.Println("Serving API on http://" + showAddr + s.pathPrefix)
+	log.Println("Serving API on http://" + showAddr + s.swaggerPath)
 	s.apiContent = s.api.getOpenAPIV3()
 	return fasthttp.ListenAndServe(s.addr, s.serve)
 }
@@ -141,16 +158,27 @@ func (s *Server) Serve() error {
 // serve serve as http handler
 func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 	// serve openapi
-	fastReq.Request.URI().QueryString()
 	path := string(fastReq.Path())
 	method := strings.ToUpper(string(fastReq.Method()))
-	if path == s.pathPrefix+"api.json" {
+	if path == s.swaggerPath+"api.json" {
 		fastReq.Write(s.apiContent)
 		return
 	}
-	if path == s.pathPrefix {
+	if path == s.swaggerPath {
 		fastReq.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
 		fastReq.Write(s.api.getSwaggerHTML())
+		return
+	}
+	if path == s.swaggerPath+"doc" {
+		fastReq.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
+		fastReq.Write(s.api.getDocHTML())
+		return
+	}
+
+	methodPath := method + "_" + path
+	hd, ok := s.rawHandler[methodPath]
+	if ok {
+		hd(fastReq)
 		return
 	}
 
@@ -170,8 +198,8 @@ func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 	}
 
 	// path to func
-	factory := s.getMethodFactory(method, path)
-	if factory == nil {
+	factory, ok := s.methods[methodPath]
+	if !ok {
 		writeErrResponse(fastReq, &ecode.APIError{Code: 404, Message: fmt.Sprintf("Request %s %s not found", method, path)})
 		return
 	}
@@ -214,6 +242,7 @@ func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 		reqBody, err = encoder(rsp)
 		if err != nil {
 			writeErrResponse(fastReq, fmt.Errorf("marshal rsp error: %v", err))
+			return
 		}
 		fastReq.Write(reqBody)
 	}
@@ -226,7 +255,7 @@ func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 			doCallFunc()
 		})
 		if err != nil {
-			log.Println("Upgrade websocket: error", err.Error())
+			log.Println("Upgrade websocket error: ", err.Error())
 		}
 		return
 	} else if method == "POST" || method == "PUT" {
@@ -238,70 +267,55 @@ func (s *Server) serve(fastReq *fasthttp.RequestCtx) {
 	doCallFunc()
 }
 
-func (s *Server) getMethodFactory(method, path string) methodFactory {
-	if v, ok := s.methods[method]; ok {
-		if vv, ok := v[path]; ok {
-			return vv
-		}
-	}
-	return nil
-}
-
 func (s *Server) PathMapping(m map[string]string) *Server {
 	s.pathMapping = m
 	return s
 }
 
 func parseMethods(m *methodInfo) error {
-	handlerName := m.handlerName
-	method := m.method
-	if method.Type.NumIn() != 4 {
-		return fmt.Errorf("the number of argment in %s.%s should be 3", handlerName, method.Name)
+	method := reflect.TypeOf(m.method)
+	if method.NumIn() != 3 {
+		return fmt.Errorf("the number of argment in %s should be 3", m.path)
 	}
-	if method.Type.NumOut() != 1 {
-		return fmt.Errorf("the number of return value in %s.%s should be 1", handlerName, method.Name)
+	if method.NumOut() != 1 {
+		return fmt.Errorf("the number of return value in %s should be 1", m.path)
 	}
 
-	ctx := method.Type.In(1)
-	req := method.Type.In(2)
-	rsp := method.Type.In(3)
+	ctx := method.In(0)
+	req := method.In(1)
+	rsp := method.In(2)
 
 	if ctx.PkgPath() != "context" || ctx.Name() != "Context" {
-		return fmt.Errorf("first argment in %s.%s should be context.Context", handlerName, method.Name)
+		return fmt.Errorf("first argment in %s should be context.Context", m.path)
 	}
 
-	if strings.HasPrefix(method.Name, "Stream") {
+	if m.httpMethod == "STREAM" {
 		if req.Kind() != reflect.Interface || req.Name() != "RecvStream" {
-			return fmt.Errorf("the type of third argment in %s/%s should be websocket.RecvStream", handlerName, method.Name)
+			return fmt.Errorf("the type of third argment in %s should be websocket.RecvStream", m.path)
 		}
 		if rsp.Kind() != reflect.Interface || rsp.Name() != "SendStream" {
-			return fmt.Errorf("the type of third argment in %s/%s should be websocket.SendStream", handlerName, method.Name)
+			return fmt.Errorf("the type of third argment in %s should be websocket.SendStream", m.path)
 		}
 		m.isWebsocket = true
 	} else {
 		if req.Kind() != reflect.Ptr || req.Elem().Kind() != reflect.Struct {
-			return fmt.Errorf("the type of second argment in %s/%s should be pointer to struct", handlerName, method.Name)
+			return fmt.Errorf("the type of second argment in %s should be pointer to struct", m.path)
 		}
 		if rsp.Kind() != reflect.Ptr || rsp.Elem().Kind() != reflect.Struct {
-			return fmt.Errorf("the type of third argment in %s/%s should be pointer to struct", handlerName, method.Name)
+			return fmt.Errorf("the type of third argment in %s should be pointer to struct", m.path)
 		}
 	}
 
-	ret := method.Type.Out(0)
+	ret := method.Out(0)
 	if ret.PkgPath() != "" || ret.Name() != "error" {
-		return fmt.Errorf("return type in %s.%s should be error", handlerName, method.Name)
+		return fmt.Errorf("return type in %s should be error", m.path)
 	}
 
-	httpMethod := getHttpMethod(method.Name)
-	if httpMethod == "" {
-		return fmt.Errorf("%s.%s function name prefix must be one of Get,Post,Put,Delete", handlerName, method.Name)
-	}
-	m.httpMethod = strings.ToUpper(httpMethod)
-
+	methodValue := reflect.ValueOf(m.method)
 	callFunc := func(ctx context.Context, req, rsp interface{}) error {
 		// args := []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req), reflect.ValueOf(rsp)}
-		args := []reflect.Value{m.handlerVal, reflect.ValueOf(ctx), reflect.ValueOf(req), reflect.ValueOf(rsp)}
-		retValues := method.Func.Call(args)
+		args := []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req), reflect.ValueOf(rsp)}
+		retValues := methodValue.Call(args)
 		ret := retValues[0].Interface()
 		if ret != nil {
 			// ingore close error message
@@ -324,38 +338,12 @@ func parseMethods(m *methodInfo) error {
 		}
 		return callFunc, reqVal, rspVal
 	}
-	m.reqType = req
-	m.rspType = req
-	return nil
-}
-
-func formatPath(prefix, handlerName, methodName string) string {
-	handlerName = strings.TrimSuffix(handlerName, "Handler")
-	httpMethod := getHttpMethod(methodName)
-	if strings.HasPrefix(methodName, "Stream") {
-		handlerName += "-ws"
-		methodName = strings.TrimPrefix(methodName, "Stream")
+	if m.isWebsocket {
+		m.reqType = req
+		m.rspType = rsp
 	} else {
-		methodName = strings.TrimPrefix(methodName, httpMethod)
+		m.reqType = req.Elem()
+		m.rspType = rsp.Elem()
 	}
-	methodName = strings.TrimPrefix(methodName, httpMethod)
-
-	handlerName = strcase.ToKebab(handlerName)
-	methodName = strcase.ToKebab(methodName)
-	if methodName == "" {
-		return fmt.Sprintf("%s%s", prefix, handlerName)
-	}
-	return fmt.Sprintf("%s%s/%s", prefix, handlerName, methodName)
-}
-
-func getHttpMethod(methodName string) string {
-	for _, v := range allowMethods {
-		if strings.HasPrefix(methodName, v) {
-			if v == "Stream" {
-				return "Get"
-			}
-			return v
-		}
-	}
-	return ""
+	return nil
 }
