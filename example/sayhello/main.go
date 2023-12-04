@@ -44,15 +44,16 @@ func Stream(ctx context.Context, req websocket.RecvStream, rsp websocket.SendStr
 
 func main() {
 	// curl '127.0.0.1:9001/api/hello?name=bob'
-	gofunc.Get("/api/hello", HelloFunc, gofunc.WithSummary("Get Example"))
-
 	// curl -X PUT '127.0.0.1:9001/api/hello' -d '{"name":"tom"}'
-	gofunc.Put("/api/hello", HelloFunc, gofunc.WithSummary("Put Example"))
+	gofunc.New("Default").
+		Get("/api/hello", HelloFunc).
+		Put("/api/hello", HelloFunc)
 
 	// websocket: 127.0.0.1:9001/api/hello-ws
-	gofunc.Stream("/api/hello-ws", Stream, gofunc.WithSummary("Websocket Example"))
+	gofunc.New("OtherService").
+		Stream("/api/hello-ws", Stream)
 
-	// curl '127.0.0.1:9001/api/hello/2'
+	// origin http: curl '127.0.0.1:9001/api/hello/2'
 	gofunc.HandleHTTP("GET", "/api/hello/2", func(rc *fasthttp.RequestCtx) {
 		rc.Response.BodyWriter().Write([]byte("HELLO FAST HTTP"))
 	})

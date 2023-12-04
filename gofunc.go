@@ -1,6 +1,10 @@
 package gofunc
 
 import (
+	"reflect"
+	"runtime"
+	"strings"
+
 	"github.com/ottstack/gofunc/internal/serve"
 	"github.com/ottstack/gofunc/pkg/middleware"
 	"github.com/valyala/fasthttp"
@@ -8,20 +12,48 @@ import (
 
 var globalServer = serve.NewServer()
 
-func Get(path string, function interface{}, opts ...applyFunc) {
-	handle("GET", path, function, opts...)
+func New(name string) *Router {
+	return &Router{name: name}
 }
-func Post(path string, function interface{}, opts ...applyFunc) {
-	handle("POST", path, function, opts...)
+
+type Router struct {
+	name string
 }
-func Delete(path string, function interface{}, opts ...applyFunc) {
-	handle("DELETE", path, function, opts...)
+
+func (r *Router) Get(path string, function interface{}) *Router {
+	r.handle("GET", path, function)
+	return r
 }
-func Put(path string, function interface{}, opts ...applyFunc) {
-	handle("PUT", path, function, opts...)
+func (r *Router) Post(path string, function interface{}) *Router {
+	r.handle("POST", path, function)
+	return r
 }
-func Stream(path string, function interface{}, opts ...applyFunc) {
-	handle("STREAM", path, function, opts...)
+func (r *Router) Delete(path string, function interface{}) *Router {
+	r.handle("DELETE", path, function)
+	return r
+}
+func (r *Router) Put(path string, function interface{}) *Router {
+	r.handle("PUT", path, function)
+	return r
+}
+func (r *Router) Stream(path string, function interface{}) *Router {
+	r.handle("STREAM", path, function)
+	return r
+}
+
+func (r *Router) handle(method, path string, function interface{}) {
+	name := getFunctionName(function)
+	if idx := strings.IndexRune(name, '.'); idx >= 0 {
+		name = name[idx+1:]
+	}
+	err := globalServer.Handle(method, path, function, name, r.name)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func getFunctionName(i interface{}) string {
+	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }
 
 func Use(m middleware.Middleware) *serve.Server {
@@ -29,7 +61,7 @@ func Use(m middleware.Middleware) *serve.Server {
 }
 
 func HandleHTTP(method, path string, f func(*fasthttp.RequestCtx)) {
-	err := globalServer.Handle(method, path, f, "", nil)
+	err := globalServer.Handle(method, path, f, "", "")
 	if err != nil {
 		panic(err)
 	}
@@ -38,20 +70,6 @@ func HandleHTTP(method, path string, f func(*fasthttp.RequestCtx)) {
 // Serve ...
 func Serve() {
 	if err := globalServer.Serve(); err != nil {
-		panic(err)
-	}
-}
-
-func handle(method, path string, function interface{}, opts ...applyFunc) {
-	opt := &funcOption{}
-	for _, op := range opts {
-		op(opt)
-	}
-	if opt.tags == nil {
-		opt.tags = []string{"Default"}
-	}
-	err := globalServer.Handle(method, path, function, opt.summary, opt.tags)
-	if err != nil {
 		panic(err)
 	}
 }

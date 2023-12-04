@@ -88,7 +88,7 @@ func NewServer() *Server {
 	return sv
 }
 
-func (s *Server) Handle(method, path string, function interface{}, summary string, tags []string) error {
+func (s *Server) Handle(method, path string, function interface{}, summary string, tag string) error {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
@@ -114,7 +114,7 @@ func (s *Server) Handle(method, path string, function interface{}, summary strin
 		httpMethod:  method,
 		path:        path,
 		summary:     summary,
-		tags:        tags,
+		tags:        []string{tag},
 		method:      function,
 		operationId: method + strings.ReplaceAll(path, "/", "_"),
 	}
