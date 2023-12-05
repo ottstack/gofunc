@@ -45,12 +45,12 @@ func Stream(ctx context.Context, req websocket.RecvStream, rsp websocket.SendStr
 func main() {
 	// curl '127.0.0.1:9001/api/hello?name=bob'
 	// curl -X PUT '127.0.0.1:9001/api/hello' -d '{"name":"tom"}'
-	gofunc.New("Default").
+	gofunc.ApiGroup("Default").
 		Get("/api/hello", HelloFunc).
 		Put("/api/hello", HelloFunc)
 
 	// websocket: 127.0.0.1:9001/api/hello-ws
-	gofunc.New("OtherService").
+	gofunc.ApiGroup("OtherService").
 		Stream("/api/hello-ws", Stream)
 
 	// origin http: curl '127.0.0.1:9001/api/hello/2'

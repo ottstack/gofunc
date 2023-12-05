@@ -12,8 +12,7 @@ import (
 )
 
 const schemaPrefix = "#/components/schemas/"
-const reqFieldTag = "schema"
-const rspFieldTag = "json"
+const filedNameTag = "json"
 
 var API_JSON = ""
 
@@ -78,7 +77,6 @@ func (o *openapi) addMethod(info *methodInfo) {
 	if info.httpMethod == "PUT" || info.httpMethod == "POST" {
 		oper.RequestBody = &openapi3.RequestBodyRef{
 			Value: &openapi3.RequestBody{
-				Required: true,
 				Content: openapi3.Content{"application/json": {
 					Schema: &openapi3.SchemaRef{
 						Ref: schemaPrefix + info.operationId + info.reqType.Name(),
@@ -86,7 +84,7 @@ func (o *openapi) addMethod(info *methodInfo) {
 				},
 				}},
 		}
-		o.parseType(info.operationId, reqFieldTag, info.reqType)
+		o.parseType(info.operationId, info.reqType)
 	} else {
 		oper.Parameters = o.buildParameter(info.operationId, info.reqType)
 	}
@@ -105,7 +103,7 @@ func (o *openapi) addMethod(info *methodInfo) {
 		o.model.Paths[info.path].Post = oper
 	}
 
-	o.parseType(info.operationId, rspFieldTag, info.rspType)
+	o.parseType(info.operationId, info.rspType)
 }
 
 func (o *openapi) buildParameter(namespace string, reqType reflect.Type) openapi3.Parameters {
@@ -113,7 +111,7 @@ func (o *openapi) buildParameter(namespace string, reqType reflect.Type) openapi
 	if elemType.Kind() == reflect.Ptr { // pointer to struct
 		elemType = reqType.Elem()
 	}
-	o.parseType(namespace, reqFieldTag, reqType)
+	o.parseType(namespace, reqType)
 	typeName := namespace + elemType.Name()
 	ref := o.model.Components.Schemas[typeName]
 
@@ -121,9 +119,10 @@ func (o *openapi) buildParameter(namespace string, reqType reflect.Type) openapi
 	if ref == nil {
 		return ret
 	}
+
 	for key, v := range ref.Value.Properties {
-		required := inArray(v.Value.Required, key)
-		p := &openapi3.Parameter{In: "query", Name: key, Required: required, Description: v.Value.Description}
+		required := inArray(ref.Value.Required, key)
+		p := &openapi3.Parameter{In: "query", Name: key, Schema: v, Required: required}
 		ret = append(ret, &openapi3.ParameterRef{Value: p})
 	}
 	return ret
@@ -171,7 +170,7 @@ func (o *openapi) getOpenAPIV3() []byte {
 	return prettyJSON.Bytes()
 }
 
-func (o *openapi) parseType(namespace, tag string, rType reflect.Type) *openapi3.SchemaRef {
+func (o *openapi) parseType(namespace string, rType reflect.Type) *openapi3.SchemaRef {
 	elemType := rType
 	if elemType.Kind() == reflect.Ptr { // pointer to struct
 		elemType = rType.Elem()
@@ -195,10 +194,10 @@ func (o *openapi) parseType(namespace, tag string, rType reflect.Type) *openapi3
 		if keyType == nil || keyType.Kind() != reflect.String {
 			panic(fmt.Sprintf("map key type for %s should be string instand of %v", elemType.Name(), elemType.Kind()))
 		}
-		subType = o.parseType(namespace, tag, elemType.Elem())
+		subType = o.parseType(namespace, elemType.Elem())
 	case reflect.Array, reflect.Slice:
 		apiType = "array"
-		subType = o.parseType(namespace, tag, elemType.Elem())
+		subType = o.parseType(namespace, elemType.Elem())
 	case reflect.Interface, reflect.Struct:
 		apiType = "object"
 		if !o.checkSchemaExists(namespace, elemType) {
@@ -234,18 +233,19 @@ func (o *openapi) parseType(namespace, tag string, rType reflect.Type) *openapi3
 						continue
 					}
 
-					fieldTag := field.Tag.Get(tag)
+					fieldTag := field.Tag.Get(filedNameTag)
 					if fieldTag == "-" {
 						continue
 					}
 					if fieldTag == "" {
 						fieldTag = field.Name
+						fieldTag = strings.ToLower(fieldTag[:1]) + fieldTag[1:]
 					}
 					if idx := strings.IndexRune(fieldTag, ','); idx >= 0 {
 						fieldTag = fieldTag[:idx]
 					}
 
-					fieldSchema := o.parseType(namespace, tag, fieldType)
+					fieldSchema := o.parseType(namespace, fieldType)
 					validateTag := field.Tag.Get("validate")
 					if strings.HasSuffix(validateTag, "required") || strings.Contains(validateTag, "required,") {
 						requiredFields = append(requiredFields, fieldTag)

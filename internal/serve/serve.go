@@ -84,7 +84,7 @@ func NewServer() *Server {
 		rawHandler:    make(map[string]func(*fasthttp.RequestCtx)),
 	}
 	sv.api = newOpenapi(cfg.SwaggerPath)
-	sv.api.parseType("", rspFieldTag, reflect.TypeOf(&ecode.APIError{}))
+	sv.api.parseType("", reflect.TypeOf(&ecode.APIError{}))
 	return sv
 }
 

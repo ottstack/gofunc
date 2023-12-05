@@ -18,6 +18,7 @@ var queryDecoder = func(queryStr []byte, v interface{}) error {
 		return err
 	}
 	d := schema.NewDecoder()
+	d.SetAliasTag(filedNameTag)
 	d.IgnoreUnknownKeys(true)
 	return d.Decode(v, u)
 }

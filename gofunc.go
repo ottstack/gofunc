@@ -12,7 +12,7 @@ import (
 
 var globalServer = serve.NewServer()
 
-func New(name string) *Router {
+func ApiGroup(name string) *Router {
 	return &Router{name: name}
 }
 
@@ -43,7 +43,7 @@ func (r *Router) Stream(path string, function interface{}) *Router {
 
 func (r *Router) handle(method, path string, function interface{}) {
 	name := getFunctionName(function)
-	if idx := strings.IndexRune(name, '.'); idx >= 0 {
+	if idx := strings.LastIndexByte(name, '.'); idx >= 0 {
 		name = name[idx+1:]
 	}
 	err := globalServer.Handle(method, path, function, name, r.name)
